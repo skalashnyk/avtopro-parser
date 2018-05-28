@@ -73,7 +73,6 @@ function login(): Promise<string> {
       body: querystring.stringify({Login: 'kalashnyck@gmail.com', Password: 'qwerty'})
     }, (err: any, res: any, body: any) => {
       let cookie = ''
-      console.log(err)
       res.headers['set-cookie'].forEach((e: string) => {
         if (e.indexOf('APD') !== -1 || e.indexOf('_BpanelUser') !== -1 || e.indexOf('_bpuexp') !== -1) {
           for (let c of e.split(';')) {
@@ -103,14 +102,15 @@ login()
       const makerHtml = await getHtml(baseUrl + makers[maker]);
       const parts = getElements(makerHtml, maker);
       for (let i = 0; i < parts.length; i++) {
-        const productHtml: string = await new Promise<string>((resolve) => {
-          setTimeout(async () => {
-            resolve(await getHtml(baseUrl + parts[i].path))
-          }, i * 1000);
-        });
+        const start = Date.now();
+        const productHtml: string = await getHtml(baseUrl + parts[i].path);
+        const end1 = Date.now();
+        console.log(`Request took ${end1-start}ms`);
         const p = processProductHtml(productHtml, parts[i]);
+        const end2 = Date.now();
+        console.log(`Parsing took ${end2-end1}ms`);
         total.push(p);
-        fs.appendFileSync(filename, `${p.brand},${p.id},"${p.type}",${p.sakuraSubstitutor || '-'},${p.minPrice},${p.maxPrice},${p.avgPrice},${p.sakuraMinPrice || '-'},${p.sakuraMaxPrice || '-'},${p.sakuraAvgPrice || '-'},${baseUrl + p.path}\n`)
+        fs.appendFileSync(filename, `${p.brand},${p.id},"${p.type}",${p.sakuraSubstitutor || '-'},${p.minPrice|| '-'},${p.maxPrice|| '-'},${p.avgPrice|| '-'},${p.sakuraMinPrice || '-'},${p.sakuraMaxPrice || '-'},${p.sakuraAvgPrice || '-'},${baseUrl + p.path}\n`)
       }
     }
 
@@ -172,7 +172,7 @@ function processProductHtml(body: string, product: Product): Product {
     });
 
   const result = Object.assign(product, getPrices(product.prices as number[], false), getPrices(product.sakuraPrices as number[], true))
-  console.log(result);
+  // console.log(result);
 
   return result;
 }

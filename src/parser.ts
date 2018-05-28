@@ -10,7 +10,7 @@ const baseUrl = 'https://avto.pro';
 /**
  * Куда сохранить файл?
  */
-const filename = `/Users/skalashnyk/products_${moment().tz('Europe/Kiev').format('YYYY-MM-DD')}.csv`;
+const filename = `/Users/skalashnyk/products_${moment().tz('Europe/Kiev').format('YYYY-MM-DD_HH-mm')}.csv`;
 
 /**
  * Отсекать цены, превышающие {skip} % минимальной цены

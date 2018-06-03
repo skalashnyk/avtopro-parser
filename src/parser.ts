@@ -10,7 +10,7 @@ const baseUrl = 'https://avto.pro';
 /**
  * Куда сохранить файл?
  */
-const filename = `/Users/skalashnyk/products_${moment().tz('Europe/Kiev').format('YYYY-MM-DD_HH-mm')}.csv`;
+const path = `/Users/skalashnyk`;
 
 /**
  * Отсекать цены, превышающие {skip} % минимальной цены
@@ -57,8 +57,11 @@ function getHtml(url: string): Promise<string> {
       uri: url,
       headers: {'cookie': globalCookie}
     }, (error: any, response: any, body: string) => {
-      if (error)
+      if (error) {
         console.error(error)
+        resolve()
+        return;
+      }
       resolve(body);
     })
   });
@@ -96,7 +99,10 @@ login()
     return getMakersUrl()
   })
   .then(async (makers: { [maker: string]: string }) => {
-    fs.writeFileSync(filename, 'Бренд,Код,Type,"Sakura код","Мин.цена (грн.)","Макс.цена (грн.)","Ср.цена (грн.)","Sakura мин.цена (грн.)","Sakura макс.цена (грн.)","Sakura ср.цена (грн.)",Url\n');
+    const productsFilename = path + `/products_${moment().tz('Europe/Kiev').format('YYYY-MM-DD_HH-mm')}.csv`;
+    const errorsFilename = path + `/errors_${moment().tz('Europe/Kiev').format('YYYY-MM-DD')}.csv`;
+    fs.writeFileSync(productsFilename, 'Бренд,Код,Type,"Sakura код","JS Asakashi код","NIBK код","Мин.цена (грн.)","Макс.цена (грн.)","Ср.цена (грн.)","Sakura мин.цена (грн.)","Sakura макс.цена (грн.)","Sakura ср.цена (грн.)","JS Asakashi мин.цена (грн.)","JS Asakashi макс.цена (грн.)","JS Asakashi ср.цена (грн.)","NIBK мин.цена (грн.)","NIBK макс.цена (грн.)","NIBK ср.цена (грн.)",Url\n');
+    fs.writeFileSync(errorsFilename, 'Бренд,Код\n');
     const total = [];
     for (let maker in makers) {
       const makerHtml = await getHtml(baseUrl + makers[maker]);
@@ -104,25 +110,21 @@ login()
       for (let i = 0; i < parts.length; i++) {
         const start = Date.now();
         const productHtml: string = await getHtml(baseUrl + parts[i].path);
+        if (!productHtml) {
+          fs.appendFileSync(errorsFilename, `${maker},${parts[i].id}`);
+          continue;
+        }
         const end1 = Date.now();
-        console.log(`Request took ${end1-start}ms`);
+        console.log(`Request took ${end1 - start}ms`);
         const p = processProductHtml(productHtml, parts[i]);
         const end2 = Date.now();
-        console.log(`Parsing took ${end2-end1}ms`);
+        console.log(`Parsing took ${end2 - end1}ms`);
         total.push(p);
-        fs.appendFileSync(filename, `${p.brand},${p.id},"${p.type}",${p.sakuraSubstitutor || '-'},${p.minPrice|| '-'},${p.maxPrice|| '-'},${p.avgPrice|| '-'},${p.sakuraMinPrice || '-'},${p.sakuraMaxPrice || '-'},${p.sakuraAvgPrice || '-'},${baseUrl + p.path}\n`)
+        fs.appendFileSync(productsFilename, `${p.brand},${p.id},"${p.type}",${p.sakuraSubstitutor || '-'},${p.asakashiSubstitutor||'-'},${p.nibkSubstitutor||'-'},${p.origMinPrice || '-'},${p.origMaxPrice || '-'},${p.origAvgPrice || '-'},${p.sakuraMinPrice || '-'},${p.sakuraMaxPrice || '-'},${p.sakuraAvgPrice || '-'},${p.asakashiMinPrice || '-'},${p.asakashiMaxPrice || '-'},${p.asakashiAvgPrice || '-'},${p.nibkMinPrice || '-'},${p.nibkMaxPrice || '-'},${p.nibkAvgPrice || '-'},${baseUrl + p.path}\n`)
       }
     }
 
     console.log(total)
-  });
-
-getHtml('https://avto.pro/makers/mann/')
-  .then(async body => {
-    const arr = getElements(body, 'Mann-Filter');
-    // console.log(arr)
-
-
   });
 
 function getElements(body: string, brand: string): { id: string, brand: string, type: string, path: string }[] {
@@ -159,19 +161,31 @@ function processProductHtml(body: string, product: Product): Product {
     .children('tr')
     .each((index, row) => {
       const brand = row.children[0].firstChild.firstChild.data;
-      if (brand && (brand === product.brand || brand === 'Sakura')) {
+      if (brand && (brand === product.brand || ['Sakura', 'JS Asakashi', 'Nibk'].indexOf(brand) !== -1)) {
         const price = parseFloat(row.children[4].attribs['data-value']);
         if (!Number.isNaN(price)) {
           if (brand === 'Sakura') {
             product.sakuraPrices ? product.sakuraPrices.push(price) : product.sakuraPrices = [price];
             product.sakuraSubstitutor = row.children[1].firstChild.firstChild.data;
+          } else if (brand === 'JS Asakashi') {
+            product.asakashiPrices ? product.asakashiPrices.push(price) : product.asakashiPrices = [price];
+            product.asakashiSubstitutor = row.children[1].firstChild.firstChild.data;
+          } else if (brand === 'Nibk') {
+            product.nibkPrices ? product.nibkPrices.push(price) : product.nibkPrices = [price];
+            product.nibkSubstitutor = row.children[1].firstChild.firstChild.data;
           } else
             product.prices ? product.prices.push(price) : product.prices = [price];
         }
       }
     });
 
-  const result = Object.assign(product, getPrices(product.prices as number[], false), getPrices(product.sakuraPrices as number[], true))
+  const result = Object.assign(
+    product,
+    getPrices(product.prices as number[], null),
+    getPrices(product.sakuraPrices as number[], 'sakura'),
+    getPrices(product.asakashiPrices as number[], 'asakashi'),
+    getPrices(product.nibkPrices as number[], 'nibk')
+  )
   // console.log(result);
 
   return result;
@@ -183,22 +197,36 @@ class Product {
   path?: string;
   type?: string;
   sakuraSubstitutor?: string;
-  sakuraPrices?: number[] = [];
+  asakashiSubstitutor?: string;
+  nibkSubstitutor?: string;
 
   prices?: Array<number> = [];
-  maxPrice?: number;
-  minPrice?: number;
-  avgPrice?: number;
+  origMaxPrice?: number;
+  origMinPrice?: number;
+  origAvgPrice?: number;
   offersNo?: number;
 
+  sakuraPrices?: number[] = [];
   sakuraMaxPrice?: number;
   sakuraMinPrice?: number;
   sakuraAvgPrice?: number;
   sakuraOffersNo?: number;
+
+  asakashiPrices?: number[] = [];
+  asakashiMaxPrice?: number;
+  asakashiMinPrice?: number;
+  asakashiAvgPrice?: number;
+  asakashiOffersNo?: number;
+
+  nibkPrices?: number[] = [];
+  nibkMaxPrice?: number;
+  nibkMinPrice?: number;
+  nibkAvgPrice?: number;
+  nibkOffersNo?: number;
 }
 
 
-function getPrices(prices: number[], sakura: boolean): { maxPrice?: number, minPrice?: number, avgPrice?: number } | { sakuraMaxPrice?: number, sakuraMinPrice?: number, sakuraAvgPrice?: number } {
+function getPrices(prices: number[], prefix: string | null): { maxPrice?: number, minPrice?: number, avgPrice?: number } | { sakuraMaxPrice?: number, sakuraMinPrice?: number, sakuraAvgPrice?: number } {
   if (!prices || prices.length === 0)
     return {};
 
@@ -215,7 +243,7 @@ function getPrices(prices: number[], sakura: boolean): { maxPrice?: number, minP
 
   for (let i = 0; i < prices.length; i++) {
     const current = prices[i];
-    if (current > minPrice * (skip/100)) {
+    if (current > minPrice * (skip / 100)) {
       maxPrice = prices[i - 1];
       break;
     }
@@ -225,9 +253,9 @@ function getPrices(prices: number[], sakura: boolean): { maxPrice?: number, minP
   }
 
   return {
-    [sakura ? 'sakuraMaxPrice' : `maxPrice`]: maxPrice,
-    [sakura ? 'sakuraMinPrice' : `minPrice`]: minPrice,
-    [sakura ? 'sakuraAvgPrice' : `avgPrice`]: Math.round(sum / qty * 100) / 100
+    [`${prefix ? prefix : `orig`}MaxPrice`]: maxPrice,
+    [`${prefix ? prefix : `orig`}MinPrice`]: minPrice,
+    [`${prefix ? prefix : `orig`}AvgPrice`]: Math.round(sum / qty * 100) / 100
   };
 }
 
